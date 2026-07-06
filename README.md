@@ -18,10 +18,33 @@ here for setup; go into a package's README to understand that piece.
 
 ---
 
+---
+
+## Getting the code (do this first)
+
+Clone the repository and move into its folder. **Every command in this guide is
+run from the repository's root folder** (the one containing `docker-compose.yml`,
+`Dockerfile`, and the `src/` folder) unless it says otherwise.
+
+```bash
+git clone <YOUR-REPO-URL> omokai_core
+cd omokai_core
+```
+
+You should now be inside `omokai_core/`. Check you're in the right place:
+```bash
+ls
+# you should see: Dockerfile  docker-compose.yml  install_native.sh  src  docs  README.md ...
+```
+Stay in this folder for everything below (Docker build, native install, the map
+step, etc.). The only time you go elsewhere is *inside* the Docker box, which is
+covered in Section 5.
+
 ## 0. One-time: add your saved map
 
-The normal demo drives around a **saved map** of the world. Put your two map
-files here before you build:
+The normal demo drives around a **saved map** of the world. From the repo root,
+put your two map files at these paths (relative to the repo root) before you
+build:
 
 ```
 src/omokai_bringup/maps/turtlebot3_world.yaml
@@ -98,7 +121,8 @@ This shuts down and removes both boxes cleanly.
 
 ## 2. Run it without Docker (native install)
 
-For a clean **Ubuntu 24.04** machine with nothing conflicting. From the repo root:
+For a clean **Ubuntu 24.04** machine with nothing conflicting. Run from the repo
+root (the `omokai_core/` folder you cloned into):
 ```bash
 bash install_native.sh    # installs ROS 2, Gazebo, TurtleBot3, Nav2, Ollama, + Python bits
 # open a NEW terminal (so the settings load), then:
