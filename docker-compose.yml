@@ -1,0 +1,37 @@
+# One command starts BOTH containers: the LLM service and the ROS/sim stack.
+#   docker compose up --build
+services:
+
+  # ── LLM service ─────────────────────────────────────────────────────────────
+  # Runs Ollama. Models are cached in a named volume so they survive restarts
+  # and aren't re-downloaded. Reachable by the ros service at http://ollama:11434.
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:                       # ros waits until this passes
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ── ROS 2 / Gazebo / pipeline ────────────────────────────────────────────────
+  ros:
+    build: .                           # builds the Dockerfile above
+    depends_on:
+      ollama:
+        condition: service_healthy     # don't start until Ollama is ready
+    environment:
+      - DISPLAY=${DISPLAY}             # so Gazebo/RViz/xterm windows appear on your screen
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_SOFTWARE=1        # CPU rendering -> works on ANY gpu (no driver setup)
+      - TURTLEBOT3_MODEL=burger
+      - LLM_MODEL=qwen2.5:3b
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw   # the X11 socket = GUI passthrough
+    stdin_open: true                   # keep it interactive
+    tty: true
+
+volumes:
+  ollama_models:                       # persists pulled LLM models
