@@ -27,7 +27,7 @@ run from the repository's root folder** (the one containing `docker-compose.yml`
 `Dockerfile`, and the `src/` folder) unless it says otherwise.
 
 ```bash
-git clone https://github.com/IAMHAADICOOL/omokai_part1_submission.git omokai_core
+git clone <YOUR-REPO-URL> omokai_core
 cd omokai_core
 ```
 
@@ -63,6 +63,21 @@ already installed inside, so it runs the same on any machine. We start **two
 boxes**: one runs the AI, the other runs the robot software. (Why two? See
 Section 6.)
 
+### Supported platform
+
+This Docker setup was **built and tested on Linux (Ubuntu 24.04) with an x86_64
+(amd64) CPU**. That's what it's designed for.
+
+- **Linux + x86_64** → fully supported (this is the intended setup).
+- **Linux + ARM64** (e.g. some servers, Raspberry Pi 5) → the images are
+  multi-architecture so it *may* build, but it's untested here; expect slower
+  CPU rendering.
+- **macOS / Windows** → **not supported for the GUI**. The windows (Gazebo, RViz,
+  the pipeline terminals) rely on Linux's X11 display, which macOS (XQuartz) and
+  Windows (WSLg) handle differently. The simulation would run, but the windows
+  won't appear the way this guide describes. Use a Linux machine (or a Linux VM
+  with a display) for the demo.
+
 ### 1a. Install Docker (only once, ever)
 ```bash
 sudo apt install -y docker.io docker-compose-v2
@@ -82,6 +97,14 @@ xhost +local:docker
 ```
 This gives the container permission to show the Gazebo / RViz / terminal
 windows on your desktop. Without it, the program runs but no windows appear.
+
+**Tip:** you have to run this once per login. To avoid re-typing it every time,
+add it to the end of your `~/.bashrc` so it runs automatically when you open a
+terminal:
+```bash
+echo "xhost +local:docker >/dev/null 2>&1" >> ~/.bashrc
+```
+(The `>/dev/null 2>&1` just hides its output so it doesn't clutter new terminals.)
 
 ### 1c. Build and start everything (one command)
 ```bash
