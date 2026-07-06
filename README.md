@@ -27,7 +27,7 @@ run from the repository's root folder** (the one containing `docker-compose.yml`
 `Dockerfile`, and the `src/` folder) unless it says otherwise.
 
 ```bash
-git clone <YOUR-REPO-URL> omokai_core
+git clone https://github.com/IAMHAADICOOL/omokai_part1_submission.git omokai_core
 cd omokai_core
 ```
 
