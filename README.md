@@ -20,7 +20,7 @@ here for setup; go into a package's README to understand that piece.
 
 ---
 
-## Getting the code (do this first)
+## Getting the code
 
 Clone the repository and move into its folder. **Every command in this guide is
 run from the repository's root folder** (the one containing `docker-compose.yml`,
