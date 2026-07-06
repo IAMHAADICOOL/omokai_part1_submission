@@ -14,6 +14,13 @@ RUN (localize in the saved map + full prompt->LLM->JSON->executor pipeline):
     ros2 launch omokai_bringup core_pipeline.launch.py            # slam:=False (default)
     ros2 launch omokai_bringup core_pipeline.launch.py map:=/abs/path/map.yaml
 
+WHERE THE ROBOT STARTS is defined ONCE in config/spawn_pose.yaml:
+    world_spawn -> where Gazebo puts the robot (simulator world frame)
+    map_seed    -> that spot in the saved-map frame -> AMCL's startup pose
+This file drives BOTH the Gazebo spawn and the AMCL seed, so they can never
+disagree (which is what used to make the robot start mislocalized). See the
+comments in spawn_pose.yaml for why map_seed is normally (0,0,0).
+
 NOTE: pass slam:=True / slam:=False with a capital letter -- nav2's own
 bringup_launch.py evaluates this argument with a Python-style eval() internally,
 and only True/False (not true/false) are valid Python literals.
@@ -21,13 +28,14 @@ and only True/False (not true/false) are valid Python literals.
 Requires: sudo apt install xterm
 """
 import os
-import math
+import tempfile
+
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
-    ExecuteProcess,
     IncludeLaunchDescription,
     TimerAction,
 )
@@ -35,6 +43,28 @@ from launch.conditions import UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+def _render_nav2_params(nav2_params_path, map_seed):
+    """Return a path to a copy of nav2_params.yaml whose AMCL section is seeded
+    at `map_seed`. This is how the robot localizes correctly at startup with no
+    manual estimate: AMCL's own set_initial_pose is set to the map-frame spawn.
+    Done here (not by a /initialpose republish) so the particle cloud is seeded
+    exactly once, at cold start -- no later disturbance."""
+    with open(nav2_params_path) as f:
+        params = yaml.safe_load(f)
+    amcl = params.setdefault("amcl", {}).setdefault("ros__parameters", {})
+    amcl["set_initial_pose"] = True
+    amcl["initial_pose"] = {
+        "x": float(map_seed["x"]),
+        "y": float(map_seed["y"]),
+        "z": 0.0,
+        "yaw": float(map_seed["yaw"]),
+    }
+    out = os.path.join(tempfile.gettempdir(), "omokai_nav2_params.yaml")
+    with open(out, "w") as f:
+        yaml.dump(params, f)
+    return out
 
 
 def generate_launch_description():
@@ -48,19 +78,16 @@ def generate_launch_description():
     nav2_params = os.path.join(bringup, "config", "nav2_params.yaml")
     default_map = os.path.join(bringup, "maps", "turtlebot3_world.yaml")
 
-    # ── Single source of truth for the robot's spawn pose ────────────────────
-    # The robot ALWAYS spawns at exactly this pose, AND AMCL is seeded here too,
-    # so localization is correct on the first try with no manual "2D Pose
-    # Estimate" -- the same trick multi-robot uses (spawn + seed both read the
-    # same numbers, so they can't disagree).
-    #
-    # These are in the map frame, which coincides with the Gazebo world frame
-    # for turtlebot3_world. (-2.0, -0.5, 0.0) is turtlebot3_world's standard,
-    # obstacle-free spawn. If you rebuild the map or move the spawn and the robot
-    # starts mislocalized: align it once in RViz, run
-    #     ros2 topic echo /amcl_pose --once
-    # and paste those x/y/yaw here -- spawn and seed then stay locked together.
-    SPAWN_X, SPAWN_Y, SPAWN_YAW = -2.0, -0.5, 0.0
+    # ── Single source of truth for where the robot starts ────────────────────
+    # world_spawn -> Gazebo (world frame); map_seed -> AMCL (map frame).
+    # Both read from ONE file so the simulator and the localizer always agree.
+    with open(os.path.join(bringup, "config", "spawn_pose.yaml")) as f:
+        spawn_cfg = yaml.safe_load(f)
+    world_spawn = spawn_cfg["world_spawn"]
+    map_seed = spawn_cfg["map_seed"]
+
+    # Bake the map_seed into AMCL's initial pose.
+    seeded_nav2_params = _render_nav2_params(nav2_params, map_seed)
 
     declare_slam = DeclareLaunchArgument(
         "slam", default_value="False",
@@ -70,18 +97,19 @@ def generate_launch_description():
         "map", default_value=default_map,
         description="Saved map yaml (used when slam:=False)")
 
+    # world_spawn -> Gazebo spawn pose
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(bringup, "launch", "sim.launch.py")),
         launch_arguments={
-            "x_pose": str(SPAWN_X),
-            "y_pose": str(SPAWN_Y),
-            "yaw": str(SPAWN_YAW),
+            "x_pose": str(world_spawn["x"]),
+            "y_pose": str(world_spawn["y"]),
+            "yaw": str(world_spawn["yaw"]),
         }.items())
 
     # nav2 bringup switches internally on `slam`:
-    #   slam:=true  -> slam_toolbox + navigation (mapping)
-    #   slam:=false -> map_server + amcl (localization in `map`) + navigation
+    #   slam:=True  -> slam_toolbox + navigation (mapping)
+    #   slam:=False -> map_server + amcl (seeded at map_seed) + navigation
     nav2_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav2, "launch", "bringup_launch.py")),
@@ -89,7 +117,7 @@ def generate_launch_description():
             "use_sim_time": "true",
             "slam": slam,
             "map": map_yaml,
-            "params_file": nav2_params,
+            "params_file": seeded_nav2_params,
         }.items())
 
     rviz = Node(
@@ -97,7 +125,7 @@ def generate_launch_description():
         arguments=["-d", os.path.join(nav2, "rviz", "nav2_default_view.rviz")],
         parameters=[{"use_sim_time": True}])
 
-    # Spine nodes run only in RUN mode (slam:=false), each in its own xterm.
+    # Spine nodes run only in RUN mode (slam:=False), each in its own xterm.
     def xterm(pkg, exe, title, params=None):
         return Node(
             package=pkg, executable=exe, name=exe, output="screen",

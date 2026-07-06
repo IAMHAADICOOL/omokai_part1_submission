@@ -1,140 +1,232 @@
-# Omokai — Core Task: Prompt → LLM → Validated JSON → Deterministic Executor → Sim
+# Omokai — Core Task
+### Type an instruction in plain English → a robot drives itself in a simulator
 
-A natural-language command drives a TurtleBot3 around a predetermined loop in
-Gazebo. An LLM only *proposes* a plan; a schema validator gates it; a
-deterministic, auditable executor carries it out. **The LLM is never in the
-control loop.**
+You type something like *"patrol the perimeter twice."* A local AI turns that
+sentence into a small plan. A safety checker makes sure the plan is allowed.
+Then a simple, predictable program drives the robot around the map in Gazebo
+(the simulator). **The AI only suggests the plan — it never drives the robot.**
 
 ```
-prompt (NL) → LLM planner → candidate JSON → validator → validated JSON → executor → Nav2/Gazebo
-              (proposes)                     (guardrail)                 (deterministic, sha256-audited)
+your words → AI planner → draft plan → safety checker → approved plan → driver → robot in simulator
+             (suggests)   (JSON)      (guardrail)                      (predictable, logged)
 ```
+
+Each stage is a separate ROS 2 package. **Every package has its own README.md**
+inside its folder (open the folder on GitHub to read it) that explains that
+package in detail — what it does, what it reads, and what it produces. Start
+here for setup; go into a package's README to understand that piece.
 
 ---
 
-## 0. One-time prerequisite: add your saved map
+## 0. One-time: add your saved map
 
-The default demo localizes in a pre-built map of `turtlebot3_world`. Copy your
-two saved map files into the repo before building:
+The normal demo drives around a **saved map** of the world. Put your two map
+files here before you build:
 
 ```
 src/omokai_bringup/maps/turtlebot3_world.yaml
 src/omokai_bringup/maps/turtlebot3_world.pgm
 ```
 
-(If you don't have them yet, build one first with `slam:=True` — see §4.)
+Don't have a map yet? Make one — see **Section 4**.
 
 ---
 
-## 1. Run with Docker (recommended)
+## 1. Run it with Docker (easiest — recommended)
 
-You do **not** need to know Docker. Two containers start together: one runs the
-LLM (Ollama), one runs ROS 2 + Gazebo + the pipeline. Rendering is done on the
-CPU, so it works on any machine regardless of GPU.
+You don't need to know Docker. Think of Docker as a **pre-built, sealed
+computer-in-a-box**: everything (ROS 2, the simulator, all the software) is
+already installed inside, so it runs the same on any machine. We start **two
+boxes**: one runs the AI, the other runs the robot software. (Why two? See
+Section 6.)
 
-### 1a. Install Docker (once)
+### 1a. Install Docker (only once, ever)
 ```bash
 sudo apt install -y docker.io docker-compose-v2
-sudo usermod -aG docker $USER    # then log out and back in
+sudo usermod -aG docker $USER    # lets you run docker without sudo
+# now LOG OUT and back in (so the group change takes effect)
 ```
-If apt reports a `containerd.io` / `containerd` conflict, you already have a
-different Docker stack installed. Remove the old Docker CE packages first, or
-keep using that stack instead of mixing them:
+If apt complains about a `containerd.io` / `containerd` conflict, you already
+have a different Docker installed — either use that, or remove the old one:
 ```bash
 sudo apt remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo apt install -y docker.io docker-compose-v2
 ```
 
-### 1b. Allow GUI windows from the container (once per login)
+### 1b. Let the boxes open windows on your screen (once each time you log in)
 ```bash
 xhost +local:docker
 ```
+This gives the container permission to show the Gazebo / RViz / terminal
+windows on your desktop. Without it, the program runs but no windows appear.
 
-### 1c. Build and run (one command)
+### 1c. Build and start everything (one command)
 ```bash
 docker compose up --build
 ```
-First run takes a while: it builds the image and downloads the ~2 GB model.
-Gazebo, RViz, and four small terminal windows (the pipeline) will appear.
+What this does, in order:
+- **builds** the box from the recipe (`Dockerfile`) — installs ROS 2, Gazebo, etc.
+- **starts** the AI box and downloads the ~2 GB AI model (first time only)
+- **starts** the robot box, which opens Gazebo, RViz, and four small terminals
 
-### 1d. Issue a command
-In the **"1 INTERFACE"** window, type a prompt and press Enter:
+The first run is slow (building + downloading). Later runs are fast.
+
+### 1d. Give the robot a command
+Click the window titled **"1 INTERFACE"**, type this, and press Enter:
 ```
 Patrol the perimeter loop twice
 ```
-Watch the robot drive the loop in Gazebo.
+Watch the robot drive the loop in the Gazebo window.
 
-### 1e. Stop
-`Ctrl-C` in the terminal, then:
+### 1e. Stop everything
+Press `Ctrl-C` in the terminal where you ran the command, then:
 ```bash
 docker compose down
 ```
+This shuts down and removes both boxes cleanly.
 
-### The only Docker commands you need
-| Command | What it does |
+### The handful of Docker commands you'll actually use
+| Command | Plain-English meaning |
 |---|---|
-| `docker compose up --build` | build (if needed) and start everything |
-| `docker compose up` | start (already built) |
-| `docker compose down` | stop and remove the containers |
-| `docker compose exec ros bash` | open a shell *inside* the running ROS container |
-| `docker compose logs -f ros` | watch the ROS container's output |
+| `docker compose up --build` | build the box (if needed) and start everything |
+| `docker compose up` | start everything (already built — faster) |
+| `docker compose down` | stop and remove the boxes |
+| `docker compose exec ros bash` | **open a terminal inside** the running robot box (see §5) |
+| `docker compose logs -f ros` | watch the robot box's messages scroll by |
 
 ---
 
-## 2. Run natively (no Docker)
+## 2. Run it without Docker (native install)
 
-For Ubuntu 24.04 + ROS 2 Jazzy. From the repo root:
+For a clean **Ubuntu 24.04** machine with nothing conflicting. From the repo root:
 ```bash
-bash install_native.sh          # installs ROS 2, Gazebo, TB3, Nav2, Ollama, deps
-# open a NEW terminal, then:
+bash install_native.sh    # installs ROS 2, Gazebo, TurtleBot3, Nav2, Ollama, + Python bits
+# open a NEW terminal (so the settings load), then:
 ros2 launch omokai_bringup core_pipeline.launch.py
 ```
-Then type a prompt in the "1 INTERFACE" window (same as §1d).
-
-Exact versions are in `DEPENDENCIES.md`.
+Then type a prompt in the "1 INTERFACE" window, exactly like §1d.
+Exact package versions are listed in `DEPENDENCIES.md`.
 
 ---
 
-## 3. What each prompt does & what to expect
+## 3. What to type, and what should happen
 
-| Prompt | Expected behaviour |
+| You type | What happens |
 |---|---|
-| `Patrol the perimeter loop twice` | robot drives the perimeter route, 2 loops |
+| `Patrol the perimeter loop twice` | robot drives the perimeter route, 2 times |
 | `Drive the perimeter once and return` | one loop |
-| `Speed 5 m/s around the loop` | **rejected** by the validator (over safe speed) — shown in the VALIDATOR window |
+| `Speed 5 m/s around the loop` | **rejected** — too fast; the VALIDATOR window says why |
 
-The four windows show the pipeline live: **INTERFACE** (you type) → **LLM
-PLANNER** (candidate JSON) → **VALIDATOR** (accept/reject + reason) → **EXECUTOR**
-(the `AUDIT` line with the mission's sha256, then waypoint progress).
+The four terminal windows are the pipeline, left to right:
+**INTERFACE** (you type) → **LLM PLANNER** (shows the draft plan as JSON) →
+**VALIDATOR** (shows accepted or rejected + the reason) → **EXECUTOR** (prints
+an `AUDIT` line with a fingerprint of the plan, then the robot's progress).
 
 ---
 
-## 4. Build a map (optional, `slam:=True`)
+## 4. Make your own map (mapping mode)
 ```bash
 ros2 launch omokai_bringup core_pipeline.launch.py slam:=True
-ros2 run turtlebot3_teleop teleop_keyboard          # drive to build the map
+ros2 run turtlebot3_teleop teleop_keyboard    # drive the robot around to build the map
 ros2 run nav2_map_server map_saver_cli -f src/omokai_bringup/maps/turtlebot3_world
 ```
-Note the **capital** `True`/`False`: Nav2 evaluates that argument in Python.
+Then rebuild so the map gets picked up: `colcon build --symlink-install`.
+
+**Important:** write `slam:=True` / `slam:=False` with a **capital** letter —
+Nav2 reads this value as Python code, and only `True`/`False` work.
+
+Where the robot starts is set in one place: `src/omokai_bringup/config/spawn_pose.yaml`.
+That file feeds both the simulator (where the robot appears) and the localizer
+(where it thinks it is), so they always agree and you never have to click a
+"2D Pose Estimate" in RViz. See the comments in that file.
 
 ---
 
-## 5. Architecture (why it's built this way)
+## 5. Working inside the Docker box
 
-- **mission_schemas** — the single source of truth: a Pydantic `Mission` model
-  (command type, route, waypoints, loops, speed constraints). Everything speaks
-  this contract.
-- **mission_interface** — publishes your typed prompt to `/mission/prompt`.
-- **mission_llm_planner** — sends the prompt to Ollama with the schema as a
-  structured-output constraint (temperature 0). It only *proposes* candidate JSON.
-- **mission_validator** — re-validates against the schema **and** safety rules
-  (speed ≤ 0.22 m/s, known routes, loop bounds). Passes → `/mission/validated`,
-  fails → `/mission/rejected`. This is the guardrail.
-- **mission_executor** — reads validated JSON only, drives Nav2's
-  `FollowWaypoints`, and logs an `AUDIT` line with `sha256(json)`. Deterministic
-  and auditable: same JSON → same behaviour, every time.
+### Open another terminal inside the running robot box
+While `docker compose up` is running, open a **new** terminal on your computer and:
+```bash
+docker compose exec ros bash
+```
+You are now *inside* the robot box. ROS 2 and the project are already loaded, so
+you can run ROS commands directly, e.g.:
+```bash
+ros2 topic list
+ros2 run turtlebot3_teleop teleop_keyboard --ros-args -r /cmd_vel:=/cmd_vel
+```
+Type `exit` to leave the inner terminal (the robot box keeps running).
 
-This satisfies the evaluation principles directly: LLM kept out of the control
-loop, JSON schema-validated, executor deterministic and auditable.
+### Add a new ROS package to the box
+1. Put your new package folder under `src/` on your computer:
+   ```
+   src/my_new_package/
+   ```
+2. Rebuild the box so it copies the new code in and compiles it:
+   ```bash
+   docker compose up --build
+   ```
+   (The recipe copies everything in `src/` and runs the build automatically.)
 
-See `docs/SOURCES.md` for cited sources and licenses.
+   **Faster, while developing:** instead of rebuilding the whole box each time,
+   open a terminal inside the box (above) and rebuild just the workspace:
+   ```bash
+   docker compose exec ros bash
+   cd /ws && colcon build --symlink-install && source install/setup.bash
+   ```
+   For this to see your latest code without a full rebuild, mount your `src/`
+   into the box by adding this under the `ros` service in `docker-compose.yml`:
+   ```yaml
+       volumes:
+         - ./src:/ws/src
+   ```
+   Then edits on your computer show up inside the box instantly; you just
+   re-run `colcon build` in the box.
+
+---
+
+## 6. Why two separate boxes (ROS box + Ollama box)?
+
+We run ROS/Gazebo in one container and the AI (Ollama) in another, on purpose:
+
+- **Each box does one job.** The AI box is a standard, ready-made Ollama image
+  we didn't have to build. The robot box only needs ROS/Gazebo. Mixing them
+  would mean a bigger, more fragile custom image.
+- **The AI model is downloaded once and kept.** The ~2 GB model lives in the AI
+  box's own storage (a Docker "volume"), so rebuilding the robot box doesn't
+  wipe or re-download it.
+- **They restart independently.** You can rebuild/restart the robot software
+  without touching the AI, and vice-versa.
+- **It mirrors reality.** On a real robot the LLM often runs as its own service
+  (its own process/machine); keeping them separate here matches that and makes
+  the boundary between "AI that suggests" and "software that acts" explicit.
+
+The two boxes talk over a private network Docker sets up automatically: the
+robot box reaches the AI at the address `http://ollama:11434` (set by the
+`OLLAMA_HOST` environment variable in `docker-compose.yml`).
+
+---
+
+## 7. How the pieces fit together (architecture)
+
+Each item is a ROS 2 package with its **own detailed README.md** inside its folder:
+
+- **mission_schemas** — the shared "contract": the exact shape a valid plan must
+  have (command type, route, loops, speed limits). Every other package uses it.
+- **mission_interface** — takes the sentence you type and puts it on the
+  `/mission/prompt` channel.
+- **mission_llm_planner** — asks the local AI (Ollama) to turn the sentence into
+  a draft plan that fits the contract. It only *suggests*.
+- **mission_validator** — the guardrail. Re-checks the draft against the contract
+  **and** safety rules (speed ≤ 0.22 m/s, known routes). Good → `/mission/validated`;
+  bad → `/mission/rejected` with a reason.
+- **mission_executor** — reads only approved plans, drives the robot through Nav2,
+  and logs a fingerprint (`sha256`) of each plan. Same plan → same behavior, always.
+- **omokai_bringup** — the "start everything" package: launch files, the map,
+  routes, robot settings, and the spawn-pose config.
+
+This is why the design is safe and gradeable: the AI is kept **out of the control
+loop**, every plan is **schema-checked**, and the driver is **predictable and
+logged**.
+
+Sources and licenses: `docs/SOURCES.md`.
